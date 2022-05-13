@@ -1,0 +1,126 @@
+From b9f973d6bf6e8d06d22ff010a488fd5e147162af Mon Sep 17 00:00:00 2001
+From: "Artem V. Navrotskiy" <bozaro@yandex.ru>
+Date: Fri, 13 May 2022 20:00:29 +0300
+Subject: [PATCH] Add stamping to .deb package version and description
+
+---
+ pkg/private/deb/deb.bzl     |  5 +++++
+ pkg/private/deb/make_deb.py | 16 ++++++++++++----
+ pkg/private/helpers.py      | 15 ++++++++++++++-
+ 3 files changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/pkg/private/deb/deb.bzl b/pkg/private/deb/deb.bzl
+index 4f103b0..776b026 100644
+--- a/pkg/private/deb/deb.bzl
++++ b/pkg/private/deb/deb.bzl
+@@ -107,6 +107,11 @@ def _pkg_deb_impl(ctx):
+     else:
+         fail("Neither description_file nor description attribute was specified")
+ 
++    # Files for stamping variables
++    args += ["--stamp=@" + ctx.version_file.path]
++    args += ["--stamp=@" + ctx.info_file.path]
++    files += [ctx.version_file, ctx.info_file]
++
+     # Built using can also be specified by a file or inlined (but is not mandatory)
+     if ctx.attr.built_using_file:
+         if ctx.attr.built_using:
+diff --git a/pkg/private/deb/make_deb.py b/pkg/private/deb/make_deb.py
+index e933b16..7cb4c6c 100644
+--- a/pkg/private/deb/make_deb.py
++++ b/pkg/private/deb/make_deb.py
+@@ -331,6 +331,10 @@ def main():
+   parser.add_argument(
+       '--triggers',
+       help='The triggers file (prefix with @ to provide a path).')
++  parser.add_argument(
++      '--stamp',
++      action='append',
++      help='The stamp variables (prefix with @ to provide a path).')
+   # see
+   # https://www.debian.org/doc/manuals/debian-faq/ch-pkg_basics.en.html#s-conffile
+   parser.add_argument(
+@@ -339,6 +343,10 @@ def main():
+   AddControlFlags(parser)
+   options = parser.parse_args()
+ 
++  stamp = dict()
++  for stamp_vars in options.stamp:
++      stamp.update(helpers.ParseStamp(helpers.GetFlagValue(stamp_vars)))
++
+   CreateDeb(
+       options.output,
+       options.data,
+@@ -351,8 +359,8 @@ def main():
+       triggers=helpers.GetFlagValue(options.triggers, False),
+       conffiles=GetFlagValues(options.conffile),
+       package=options.package,
+-      version=helpers.GetFlagValue(options.version),
+-      description=helpers.GetFlagValue(options.description),
++      version=helpers.GetFlagValue(options.version, stamp=stamp),
++      description=helpers.GetFlagValue(options.description, stamp=stamp),
+       maintainer=helpers.GetFlagValue(options.maintainer),
+       section=options.section,
+       architecture=helpers.GetFlagValue(options.architecture),
+@@ -373,9 +381,9 @@ def main():
+       output=options.changes,
+       deb_file=options.output,
+       architecture=options.architecture,
+-      short_description=helpers.GetFlagValue(options.description).split('\n')[0],
++      short_description=helpers.GetFlagValue(options.description, stamp=stamp).split('\n')[0],
+       maintainer=helpers.GetFlagValue(options.maintainer), package=options.package,
+-      version=helpers.GetFlagValue(options.version), section=options.section,
++      version=helpers.GetFlagValue(options.version, stamp=stamp), section=options.section,
+       priority=options.priority, distribution=options.distribution,
+       urgency=options.urgency)
+ 
+diff --git a/pkg/private/helpers.py b/pkg/private/helpers.py
+index 0ad8e93..4f801f2 100644
+--- a/pkg/private/helpers.py
++++ b/pkg/private/helpers.py
+@@ -12,6 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ import os
++import re
+ import sys
+ 
+ def SplitNameValuePairAtSeparator(arg, sep):
+@@ -48,7 +49,7 @@ def SplitNameValuePairAtSeparator(arg, sep):
+   # if we leave the loop, the character sep was not found unquoted
+   return (head, '')
+ 
+-def GetFlagValue(flagvalue, strip=True):
++def GetFlagValue(flagvalue, strip=True, stamp=None):
+   """Converts a raw flag string to a useable value.
+ 
+   1. Expand @filename style flags to the content of filename.
+@@ -63,6 +64,7 @@ def GetFlagValue(flagvalue, strip=True):
+   Args:
+     flagvalue: (str) raw flag value
+     strip: (bool) Strip white space.
++    stamp: (dict) Stamp variables for inline values
+ 
+   Returns:
+     Python2: unicode
+@@ -84,6 +86,17 @@ def GetFlagValue(flagvalue, strip=True):
+       if sys.version_info[0] > 2:
+         flagvalue = os.fsencode(flagvalue).decode('utf-8')
+ 
++    if stamp != None:
++      flagvalue = re.sub(r'\{(\w+)\}', lambda m: stamp.get(m.group(1), m.group(0)), flagvalue)
++
+     if strip:
+       return flagvalue.strip()
+   return flagvalue
++
++def ParseStamp(data):
++  vars = dict()
++  for line in data.split("\n"):
++    sep = line.find(' ')
++    if sep >= 0:
++      vars[line[:sep]] = line[sep+1:]
++  return vars
+-- 
+2.25.1
+

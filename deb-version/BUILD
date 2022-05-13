@@ -35,5 +35,5 @@ pkg_deb(
     maintainer = "joomcode",
     package = "foo",
     package_file_name = "foo_unknown_amd64.deb",
-    version_file = ":foo-version",
+    version = "1.2.{BUILD_TIMESTAMP}",
 )
